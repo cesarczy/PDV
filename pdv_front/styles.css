@@ -563,3 +563,8 @@ button.edit-btn:hover {
     letter-spacing:1px;
     margin-left:2px;
 }
+
+/* Esconde o cabeçalho somente na tela de login */
+body:has(#loginSection:not(.hidden)) .topbar {
+    display: none;
+}
