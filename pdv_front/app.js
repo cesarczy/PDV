@@ -267,7 +267,6 @@ function renderUsers() {
       <td>${user.login}</td>
       <td>
         <button type="button" class="ghost-btn user-edit-btn" data-user-id="${user.id}">Editar</button>
-        <button type="button" class="ghost-btn user-password-btn" data-user-id="${user.id}">Trocar senha</button>
         <button type="button" class="ghost-btn user-delete-btn" data-user-id="${user.id}" style="color: #d32f2f;">Excluir</button>
       </td>
     `;
@@ -276,10 +275,6 @@ function renderUsers() {
 
   usersTableBody.querySelectorAll('.user-edit-btn').forEach((button) => {
     button.addEventListener('click', () => openUserEdit(button.dataset.userId));
-  });
-
-  usersTableBody.querySelectorAll('.user-password-btn').forEach((button) => {
-    button.addEventListener('click', () => openChangePassword(button.dataset.userId));
   });
 
   usersTableBody.querySelectorAll('.user-delete-btn').forEach((button) => {
