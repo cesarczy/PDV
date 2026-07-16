@@ -182,8 +182,9 @@ button:hover {
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  text-align: center;
   margin: 0 8px 14px;
-  color: var(--muted);
+  color: var(--primary);
 }
 
 .nav-btn {
@@ -272,7 +273,8 @@ button:hover {
 }
 
 .hint {
-  color: var(--muted);
+  text-align: center;
+  color: var(--primary);
   font-size: 0.95rem;
 }
 
