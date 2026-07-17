@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -66,6 +68,55 @@ CREATE_TABLES_SQL = [
       value TEXT
     )'''
 ]
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100_000)
+    return f'pbkdf2$100000${salt}${digest.hex()}'
+
+
+def is_hashed_password(password: str) -> bool:
+    return password.startswith('pbkdf2$')
+
+
+def verify_password(password: str, stored: str) -> bool:
+    if not is_hashed_password(stored):
+        return secrets.compare_digest(password, stored)
+    _, iterations, salt, hash_hex = stored.split('$', 3)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), int(iterations))
+    return secrets.compare_digest(digest.hex(), hash_hex)
+
+
+def resolve_user_password(user: dict, existing_passwords: dict) -> str:
+    password = user.get('password', '')
+    user_id = user['id']
+    if password:
+        return password if is_hashed_password(password) else hash_password(password)
+    return existing_passwords.get(user_id, hash_password(''))
+
+
+def verify_login(login: str, password: str) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            'SELECT password FROM users WHERE login = ?',
+            (login,)
+        ).fetchone()
+        if not row:
+            return False
+        stored = row['password']
+        if not verify_password(password, stored):
+            return False
+        if not is_hashed_password(stored):
+            conn.execute(
+                'UPDATE users SET password = ? WHERE login = ?',
+                (hash_password(password), login)
+            )
+            conn.commit()
+        return True
+    finally:
+        conn.close()
 
 
 def get_connection():
@@ -152,7 +203,10 @@ def initialize_database():
         if user_count == 0:
             conn.executemany(
                 'INSERT INTO users (id, name, login, password) VALUES (?, ?, ?, ?)',
-                [(user['id'], user['name'], user['login'], user['password']) for user in INITIAL_USERS]
+                [
+                    (user['id'], user['name'], user['login'], hash_password(user['password']))
+                    for user in INITIAL_USERS
+                ]
             )
     conn.close()
 
@@ -164,7 +218,7 @@ def load_state():
         items = [dict(row) for row in conn.execute('SELECT id, name, price, stock FROM items ORDER BY name')]
         clients = [dict(row) for row in conn.execute('SELECT id, name, ficha, status FROM clients ORDER BY ficha')]
         purchases = [dict(row) for row in conn.execute('SELECT id, client_id AS clientId, item_id AS itemId, item_name AS itemName, quantity, total, created_at AS createdAt, closed_at AS closedAt FROM purchases ORDER BY created_at DESC')]
-        users = [dict(row) for row in conn.execute('SELECT id, name, login, password FROM users ORDER BY name')]
+        users = [dict(row) for row in conn.execute('SELECT id, name, login FROM users ORDER BY name')]
         entry_fee = conn.execute("SELECT value FROM app_settings WHERE key = 'entry_fee'").fetchone()['value']
         return {'items': items, 'clients': clients, 'purchases': purchases, 'users': users, 'entryFee': float(entry_fee)}
     finally:
@@ -180,6 +234,11 @@ def save_state(parsed):
     conn = get_connection()
     try:
         with conn:
+            existing_passwords = {
+                row['id']: row['password']
+                for row in conn.execute('SELECT id, password FROM users').fetchall()
+            }
+
             current_entry_fee = conn.execute(
                 "SELECT id, name, price, stock FROM items WHERE id = 'entry-fee'"
             ).fetchone()
@@ -221,7 +280,7 @@ def save_state(parsed):
             conn.executemany(
                 'INSERT INTO users (id, name, login, password) VALUES (?, ?, ?, ?)',
                 [
-                    (user['id'], user['name'], user['login'], user['password'])
+                    (user['id'], user['name'], user['login'], resolve_user_password(user, existing_passwords))
                     for user in users
                 ]
             )
@@ -248,7 +307,25 @@ class APIRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path == '/api/state':
+        if parsed.path == '/api/login':
+            content_length = int(self.headers.get('Content-Length', 0))
+            raw_body = self.rfile.read(content_length) if content_length else b''
+            try:
+                body = json.loads(raw_body.decode('utf-8'))
+                login = body.get('login', '').strip()
+                password = body.get('password', '')
+                if not login or not password:
+                    self.send_json({'error': 'Credenciais inválidas'}, status=401)
+                    return
+                if verify_login(login, password):
+                    self.send_json({'ok': True})
+                else:
+                    self.send_json({'error': 'Credenciais inválidas'}, status=401)
+            except json.JSONDecodeError:
+                self.send_json({'error': 'JSON inválido'}, status=400)
+            except Exception as exc:
+                self.send_json({'error': str(exc)}, status=500)
+        elif parsed.path == '/api/state':
             content_length = int(self.headers.get('Content-Length', 0))
             raw_body = self.rfile.read(content_length) if content_length else b''
             try:

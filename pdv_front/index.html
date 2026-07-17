@@ -230,7 +230,23 @@
               </header>
               <div class="modal-actions confirm-actions">
                 <button id="confirmCancelBtn" type="button" class="ghost-btn">Cancelar</button>
-                <button id="confirmOkBtn" type="button">Confirmar Pagamento</button>
+                <button id="confirmOkBtn" type="button">Confirmar</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="messageModal" class="modal hidden">
+            <div class="modal-backdrop" id="messageBackdrop"></div>
+            <div class="modal-dialog confirm-dialog">
+              <header class="modal-header">
+                <div>
+                  <p class="eyebrow">Aviso</p>
+                  <h3 id="messageTitle">Mensagem</h3>
+                  <p id="messageText" class="muted-text"></p>
+                </div>
+              </header>
+              <div class="modal-actions confirm-actions">
+                <button id="messageOkBtn" type="button">OK</button>
               </div>
             </div>
           </div>
@@ -330,7 +346,7 @@
                 </label>
                 <label>
                   Senha
-                  <input id="editUserPassword" type="password" required />
+                  <input id="editUserPassword" type="password" placeholder="Deixe em branco para manter a atual" />
                 </label>
                 <button type="submit">Salvar alterações</button>
               </form>

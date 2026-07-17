@@ -495,6 +495,51 @@ button.edit-btn:hover {
   color: var(--muted);
 }
 
+.relatorio-result {
+  margin-top: 20px;
+}
+
+.relatorio-content {
+  display: grid;
+  gap: 20px;
+}
+
+.relatorio-section h4 {
+  margin: 0 0 12px;
+}
+
+.relatorio-item,
+.relatorio-summary-box {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 6px;
+}
+
+.relatorio-item-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.relatorio-item-detail {
+  font-size: 14px;
+  color: #666;
+}
+
+.relatorio-empty {
+  color: #999;
+}
+
+.purchase-entry-fee {
+  opacity: 0.85;
+}
+
+.purchase-entry-fee .entry-fee-tag {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .login-card {
     grid-template-columns: 1fr;

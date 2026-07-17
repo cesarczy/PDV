@@ -14,14 +14,23 @@
     }));
   }
 
-  function getClientPurchases(clientId, purchases) {
+  function getOpenPurchases(clientId, purchases) {
     return purchases.filter(
-      (purchase) => purchase.clientId === clientId && !purchase.closedAt && purchase.itemId !== 'entry-fee'
+      (purchase) => purchase.clientId === clientId && !purchase.closedAt
+    );
+  }
+
+  function getClientPurchases(clientId, purchases) {
+    return getOpenPurchases(clientId, purchases).filter(
+      (purchase) => purchase.itemId !== 'entry-fee'
     );
   }
 
   function getClientTotal(clientId, purchases) {
-    return getClientPurchases(clientId, purchases).reduce((total, purchase) => total + purchase.total, 0);
+    return getClientPurchases(clientId, purchases).reduce(
+      (total, purchase) => total + purchase.total,
+      0
+    );
   }
 
   function closeClientAccount(state, clientId) {
@@ -43,6 +52,7 @@
 
   return {
     buildInitialClients,
+    getOpenPurchases,
     getClientPurchases,
     getClientTotal,
     closeClientAccount

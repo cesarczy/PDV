@@ -4,23 +4,25 @@ const STORAGE_VERSION = 2;
 const initialState = {
   version: STORAGE_VERSION,
   loggedIn: false,
-  activeSection: 'clientes',
+  activeSection: 'cadastro',
   activeKeyId: null,
   items: [
-    { id: crypto.randomUUID(), name: 'Coca-Cola', price: 6.5, stock: 20 },
-    { id: crypto.randomUUID(), name: 'Água', price: 3.5, stock: 30 },
-    { id: crypto.randomUUID(), name: 'Batata frita', price: 12, stock: 15 }
+    { id: 'entry-fee', name: 'Chave', price: 0, stock: 0 },
+    { id: 'item-1', name: 'Coca-Cola', price: 6.5, stock: 20 },
+    { id: 'item-2', name: 'Água', price: 3.5, stock: 30 },
+    { id: 'item-3', name: 'Batata frita', price: 12, stock: 15 }
   ],
   clients: window.BebidasLogic.buildInitialClients(),
   purchases: [],
   entryFee: 0,
   users: [
-    { id: 'user-admin', name: 'Administrador', login: 'admin', password: 'admin123' }
+    { id: 'user-admin', name: 'Administrador', login: 'admin' }
   ]
 };
 
 let state = initialState;
 let saveQueue = Promise.resolve();
+const pendingUserPasswords = {};
 
 const loginSection = document.getElementById('loginSection');
 const dashboard = document.getElementById('dashboard');
@@ -63,10 +65,64 @@ const closeEditEntryFeeBtn = document.getElementById('closeEditEntryFeeBtn');
 const editEntryFeeForm = document.getElementById('editEntryFeeForm');
 const editEntryFeeInput = document.getElementById('editEntryFee');
 
+const messageModal = document.getElementById('messageModal');
+const messageBackdrop = document.getElementById('messageBackdrop');
+const messageTitle = document.getElementById('messageTitle');
+const messageText = document.getElementById('messageText');
+const messageOkBtn = document.getElementById('messageOkBtn');
+
 let currentConfirmAction = null;
 let activeEditItemId = null;
 let currentEditedUserId = null;
 let currentPasswordUserId = null;
+
+function sanitizeUsers(users) {
+  return users.map(({ id, name, login }) => ({ id, name, login }));
+}
+
+function normalizeState(parsed) {
+  let items = Array.isArray(parsed.items) && parsed.items.length ? parsed.items : initialState.items;
+  if (!items.some((item) => item.id === 'entry-fee')) {
+    items = [
+      { id: 'entry-fee', name: 'Chave', price: Number(parsed.entryFee) || 0, stock: 0 },
+      ...items
+    ];
+  }
+
+  const entryFeeItem = items.find((item) => item.id === 'entry-fee');
+
+  return {
+    ...initialState,
+    ...parsed,
+    items,
+    clients: Array.isArray(parsed.clients) && parsed.clients.length ? parsed.clients : initialState.clients,
+    purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+    entryFee: Number(entryFeeItem?.price ?? parsed.entryFee) || 0,
+    users: Array.isArray(parsed.users) && parsed.users.length
+      ? sanitizeUsers(parsed.users)
+      : initialState.users
+  };
+}
+
+function showMessage(title, message) {
+  messageTitle.textContent = title;
+  messageText.textContent = message;
+  messageModal.classList.remove('hidden');
+}
+
+function closeMessageModal() {
+  messageModal.classList.add('hidden');
+}
+
+function buildUsersPayload() {
+  return state.users.map((user) => {
+    const payload = { id: user.id, name: user.name, login: user.login };
+    if (pendingUserPasswords[user.id]) {
+      payload.password = pendingUserPasswords[user.id];
+    }
+    return payload;
+  });
+}
 
 async function loadState() {
   try {
@@ -75,15 +131,7 @@ async function loadState() {
       throw new Error('Falha ao carregar estado do servidor');
     }
     const parsed = await response.json();
-    state = {
-      ...initialState,
-      ...parsed,
-      items: Array.isArray(parsed.items) && parsed.items.length ? parsed.items : initialState.items,
-      clients: Array.isArray(parsed.clients) && parsed.clients.length ? parsed.clients : initialState.clients,
-      purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
-      entryFee: Number(parsed.entryFee) || 0,
-      users: Array.isArray(parsed.users) && parsed.users.length ? parsed.users : initialState.users
-    };
+    state = normalizeState(parsed);
   } catch (error) {
     console.error('Erro ao carregar estado do servidor', error);
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -91,15 +139,7 @@ async function loadState() {
       try {
         const parsed = JSON.parse(stored);
         if (parsed.version === STORAGE_VERSION) {
-          state = {
-            ...initialState,
-            ...parsed,
-            items: Array.isArray(parsed.items) && parsed.items.length ? parsed.items : initialState.items,
-            clients: Array.isArray(parsed.clients) && parsed.clients.length ? parsed.clients : initialState.clients,
-            purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
-            entryFee: Number(parsed.entryFee) || 0,
-            users: Array.isArray(parsed.users) && parsed.users.length ? parsed.users : initialState.users
-          };
+          state = normalizeState(parsed);
         }
       } catch (storageError) {
         console.error('Erro ao carregar estado do localStorage', storageError);
@@ -110,13 +150,18 @@ async function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const storageSnapshot = {
+    ...state,
+    users: sanitizeUsers(state.users)
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(storageSnapshot));
+
   const snapshot = JSON.stringify({
     items: state.items,
     clients: state.clients,
     purchases: state.purchases,
     entryFee: state.entryFee,
-    users: state.users
+    users: buildUsersPayload()
   });
 
   saveQueue = saveQueue
@@ -129,9 +174,13 @@ function saveState() {
       if (!response.ok) {
         throw new Error('Falha ao salvar estado no servidor');
       }
+      Object.keys(pendingUserPasswords).forEach((userId) => {
+        delete pendingUserPasswords[userId];
+      });
     })
     .catch((error) => {
       console.error('Erro ao salvar estado no servidor', error);
+      showMessage('Erro ao salvar', 'Não foi possível sincronizar com o servidor. Os dados locais foram mantidos.');
     });
 
   return saveQueue;
@@ -292,7 +341,7 @@ function openUserEdit(userId) {
   currentEditedUserId = userId;
   editUserName.value = user.name;
   editUserLogin.value = user.login;
-  editUserPassword.value = user.password;
+  editUserPassword.value = '';
   editUserTitle.textContent = `Editar ${user.name}`;
   editUserModal.classList.remove('hidden');
 }
@@ -320,23 +369,34 @@ function closeChangePassword() {
 function deleteUser(userId) {
   const user = state.users.find((entry) => entry.id === userId);
   if (!user) return;
-  
-  if (confirm(`Tem certeza que deseja excluir o usuário "${user.name}"?`)) {
-    state.users = state.users.filter((entry) => entry.id !== userId);
-    saveState();
-    render();
-  }
+
+  openConfirmModal(
+    'Excluir usuário',
+    `Tem certeza que deseja excluir o usuário "${user.name}"?`,
+    null,
+    () => {
+      state.users = state.users.filter((entry) => entry.id !== userId);
+      delete pendingUserPasswords[userId];
+      saveState();
+      render();
+    }
+  );
 }
 
 function deleteItem(itemId) {
   const item = state.items.find((entry) => entry.id === itemId);
   if (!item) return;
-  
-  if (confirm(`Tem certeza que deseja excluir o produto "${item.name}"?`)) {
-    state.items = state.items.filter((entry) => entry.id !== itemId);
-    saveState();
-    render();
-  }
+
+  openConfirmModal(
+    'Excluir produto',
+    `Tem certeza que deseja excluir o produto "${item.name}"?`,
+    null,
+    () => {
+      state.items = state.items.filter((entry) => entry.id !== itemId);
+      saveState();
+      render();
+    }
+  );
 }
 
 function renderKeyPanel() {
@@ -378,6 +438,7 @@ function openKeyModal(client) {
 
   keyModal.classList.remove('hidden');
   modalKeyTitle.textContent = `Chave ${client.ficha}`;
+  modalProductQuantity.value = '1';
   closeAccountBtn.classList.toggle('hidden', client.status !== 'em uso');
   renderKeyPanel();
   renderModalProductOptions();
@@ -399,6 +460,7 @@ function chargeEntryFeeAtEntry(client, isNewAccount) {
   const missingEntryFeeForOpenAccount = !isNewAccount && entryFeePurchases.length === 0;
   if ((!isNewAccount && !missingEntryFeeForOpenAccount) || entryFee <= 0) return false;
 
+  const now = new Date().toISOString();
   state.purchases.push({
     id: crypto.randomUUID(),
     clientId: client.id,
@@ -406,7 +468,8 @@ function chargeEntryFeeAtEntry(client, isNewAccount) {
     itemName: entryFeeItem.name,
     quantity: 1,
     total: entryFee,
-    createdAt: new Date().toISOString()
+    createdAt: now,
+    closedAt: now
   });
   return true;
 }
@@ -436,7 +499,8 @@ function renderModalSales() {
     const item = state.items.find((entry) => entry.id === purchase.itemId);
     const li = document.createElement('li');
     const label = document.createElement('span');
-    label.textContent = `${purchase.itemName || item?.name || 'Produto'} x${purchase.quantity}`;
+    const productName = purchase.itemName || item?.name || 'Produto';
+    label.textContent = `${productName} x${purchase.quantity}`;
     const value = document.createElement('span');
     value.textContent = formatCurrency(purchase.total);
     li.appendChild(label);
@@ -455,20 +519,29 @@ function renderModalSales() {
   });
 }
 
-loginForm.addEventListener('submit', (event) => {
+loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
 
-  const matchedUser = state.users.find((user) => user.login === username && user.password === password);
-  if (matchedUser) {
-    state.loggedIn = true;
-    state.activeSection = 'cadastro';
-    saveState();
-    render();
-  } else {
-    alert('Credenciais inválidas.');
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: username, password })
+    });
+    if (response.ok) {
+      state.loggedIn = true;
+      state.activeSection = 'cadastro';
+      saveState();
+      render();
+      return;
+    }
+  } catch (error) {
+    console.error('Erro ao autenticar no servidor', error);
   }
+
+  showMessage('Login inválido', 'Credenciais inválidas. Verifique usuário e senha.');
 });
 
 logoutBtn.addEventListener('click', () => {
@@ -488,21 +561,22 @@ userForm.addEventListener('submit', (event) => {
   const password = userPasswordInput.value;
 
   if (!name || !login || !password) {
-    alert('Preencha todos os campos do usuário.');
+    showMessage('Campos obrigatórios', 'Preencha todos os campos do usuário.');
     return;
   }
 
   const otherUserWithLogin = state.users.find((user) => user.login === login);
   if (otherUserWithLogin) {
-    alert('Já existe um usuário com esse login.');
+    showMessage('Login em uso', 'Já existe um usuário com esse login.');
     return;
   }
 
+  const userId = crypto.randomUUID();
+  pendingUserPasswords[userId] = password;
   state.users.push({
-    id: crypto.randomUUID(),
+    id: userId,
     name,
-    login,
-    password
+    login
   });
 
   saveState();
@@ -522,17 +596,14 @@ changePasswordForm.addEventListener('submit', (event) => {
   const newPassword = newPasswordInput.value;
   const confirmPassword = confirmNewPasswordInput.value;
   if (!newPassword || newPassword !== confirmPassword) {
-    alert('As senhas devem ser iguais.');
+    showMessage('Senhas diferentes', 'As senhas devem ser iguais.');
     return;
   }
 
-  const user = state.users.find((entry) => entry.id === currentPasswordUserId);
-  if (user) {
-    user.password = newPassword;
-    saveState();
-    closeChangePassword();
-    render();
-  }
+  pendingUserPasswords[currentPasswordUserId] = newPassword;
+  saveState();
+  closeChangePassword();
+  render();
 });
 
 closeChangePasswordBtn.addEventListener('click', closeChangePassword);
@@ -547,14 +618,14 @@ editUserForm.addEventListener('submit', (event) => {
   const login = editUserLogin.value.trim();
   const password = editUserPassword.value;
 
-  if (!name || !login || !password) {
-    alert('Preencha todos os campos.');
+  if (!name || !login) {
+    showMessage('Campos obrigatórios', 'Preencha nome e login.');
     return;
   }
 
   const otherUserWithLogin = state.users.find((user) => user.login === login && user.id !== currentEditedUserId);
   if (otherUserWithLogin) {
-    alert('Já existe um usuário com esse login.');
+    showMessage('Login em uso', 'Já existe um usuário com esse login.');
     return;
   }
 
@@ -562,7 +633,9 @@ editUserForm.addEventListener('submit', (event) => {
   if (user) {
     user.name = name;
     user.login = login;
-    user.password = password;
+    if (password) {
+      pendingUserPasswords[currentEditedUserId] = password;
+    }
     saveState();
     closeEditUser();
     render();
@@ -577,7 +650,7 @@ relatorioForm.addEventListener('submit', (event) => {
   const startDate = relatorioStartDate.value;
   const endDate = relatorioEndDate.value;
   if (startDate > endDate) {
-    alert('A data inicial não pode ser posterior à data final.');
+    showMessage('Período inválido', 'A data inicial não pode ser posterior à data final.');
     return;
   }
   gerarRelatorio(startDate, endDate);
@@ -624,26 +697,29 @@ function renderRelatorio(startDate, endDate, productSales, keyRevenue, consumabl
   relatorioSummaryTitle.textContent = isSingleDay ? 'Resumo do dia' : 'Resumo do período';
 
   relatorioProducts.innerHTML = '';
+  const emptyMessage = isSingleDay
+    ? 'Nenhuma venda neste dia.'
+    : 'Nenhuma venda neste período.';
   if (Object.keys(productSales).length === 0) {
-    relatorioProducts.innerHTML = '<p style="color: #999;">Nenhuma venda neste dia.</p>';
+    relatorioProducts.innerHTML = `<p class="relatorio-empty">${emptyMessage}</p>`;
   } else {
     Object.entries(productSales).forEach(([productName, data]) => {
       const div = document.createElement('div');
-      div.style.cssText = 'margin-bottom: 12px; padding: 12px; background: #f5f5f5; border-radius: 6px;';
+      div.className = 'relatorio-item';
       div.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 4px;">${productName}</div>
-        <div style="font-size: 14px; color: #666;">Quantidade: ${data.quantity} unidades</div>
-        <div style="font-size: 14px; color: #666;">Total: ${formatCurrency(data.total)}</div>
+        <div class="relatorio-item-title">${productName}</div>
+        <div class="relatorio-item-detail">Quantidade: ${data.quantity} unidades</div>
+        <div class="relatorio-item-detail">Total: ${formatCurrency(data.total)}</div>
       `;
       relatorioProducts.appendChild(div);
     });
   }
 
   relatorioSummary.innerHTML = `
-    <div style="margin-bottom: 12px; padding: 12px; background: #f5f5f5; border-radius: 6px;">
-      <div style="margin-bottom: 8px;"><strong>Total de chaves vendidas:</strong> ${formatCurrency(keyRevenue)}</div>
-      <div style="margin-bottom: 8px;"><strong>Total de produtos consumíveis:</strong> ${formatCurrency(consumableRevenue)}</div>
-      <div><strong>Receita total:</strong> ${formatCurrency(totalRevenue)}</div>
+    <div class="relatorio-summary-box">
+      <div class="relatorio-item-detail" style="margin-bottom: 8px;"><strong>Total de chaves vendidas:</strong> ${formatCurrency(keyRevenue)}</div>
+      <div class="relatorio-item-detail" style="margin-bottom: 8px;"><strong>Total de produtos consumíveis:</strong> ${formatCurrency(consumableRevenue)}</div>
+      <div class="relatorio-item-detail"><strong>Receita total:</strong> ${formatCurrency(totalRevenue)}</div>
     </div>
   `;
 
@@ -660,7 +736,7 @@ itemForm.addEventListener('submit', (event) => {
   const itemStock = Number(document.getElementById('itemStock').value);
 
   if (!itemName || itemPrice < 0 || itemStock < 0) {
-    alert('Preencha os dados corretamente.');
+    showMessage('Dados inválidos', 'Preencha os dados corretamente.');
     return;
   }
 
@@ -693,17 +769,17 @@ modalProductForm.addEventListener('submit', (event) => {
   const item = state.items.find((entry) => entry.id === productId);
 
   if (!client) {
-    alert('Cliente não encontrado.');
+    showMessage('Cliente não encontrado', 'Selecione uma chave válida.');
     return;
   }
 
   if (!item || quantity <= 0) {
-    alert('Selecione um produto e uma quantidade válidos.');
+    showMessage('Dados inválidos', 'Selecione um produto e uma quantidade válidos.');
     return;
   }
 
   if (item.stock < quantity) {
-    alert('Estoque insuficiente.');
+    showMessage('Estoque insuficiente', 'Não há estoque suficiente para esta quantidade.');
     return;
   }
 
@@ -743,6 +819,8 @@ closeEditItemBtn.addEventListener('click', closeEditItemModal);
 editItemBackdrop.addEventListener('click', closeEditItemModal);
 closeEditEntryFeeBtn.addEventListener('click', closeEditEntryFeeModal);
 editEntryFeeBackdrop.addEventListener('click', closeEditEntryFeeModal);
+messageOkBtn.addEventListener('click', closeMessageModal);
+messageBackdrop.addEventListener('click', closeMessageModal);
 
 editItemForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -760,7 +838,7 @@ editItemForm.addEventListener('submit', (event) => {
   const addedStock = Number(editAddStock.value);
 
   if (!updatedName || updatedPrice < 0 || addedStock < 0) {
-    alert('Preencha os dados corretamente.');
+    showMessage('Dados inválidos', 'Preencha os dados corretamente.');
     return;
   }
 
@@ -778,24 +856,31 @@ editEntryFeeForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const entryFee = Number(editEntryFeeInput.value);
   if (entryFee < 0) {
-    alert('Informe um preço válido para a chave.');
+    showMessage('Preço inválido', 'Informe um preço válido para a chave.');
     return;
   }
   const entryFeeItem = getEntryFeeItem();
   if (!entryFeeItem) {
-    alert('Produto Chave não encontrado. Recarregue a página e tente novamente.');
+    showMessage('Erro', 'Produto Chave não encontrado. Recarregue a página e tente novamente.');
     return;
   }
   entryFeeItem.price = entryFee;
+  state.entryFee = entryFee;
   saveState();
   render();
   closeEditEntryFeeModal();
 });
 
-function openConfirmModal(title, message, total, onConfirm) {
+function openConfirmModal(title, message, total, onConfirm, confirmLabel = 'Confirmar') {
   confirmTitle.textContent = title;
   confirmMessage.textContent = message;
-  confirmTotal.textContent = total;
+  confirmOkBtn.textContent = confirmLabel;
+  if (total) {
+    confirmTotal.textContent = total;
+    confirmTotal.classList.remove('hidden');
+  } else {
+    confirmTotal.classList.add('hidden');
+  }
   currentConfirmAction = onConfirm;
   confirmModal.classList.remove('hidden');
 }
@@ -869,7 +954,8 @@ closeAccountBtn.addEventListener('click', () => {
       saveState();
       render();
       closeKeyModal();
-    }
+    },
+    'Confirmar pagamento'
   );
 });
 
