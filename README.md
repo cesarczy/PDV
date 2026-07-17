@@ -75,4 +75,3 @@ python3 pdv_back/server.py
 ```
 
 O servidor publica os arquivos de `pdv_front/` e disponibiliza a API em `/api/state`.
-1
