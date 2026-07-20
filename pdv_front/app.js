@@ -80,6 +80,24 @@ function sanitizeUsers(users) {
   return users.map(({ id, name, login }) => ({ id, name, login }));
 }
 
+function normalizeActiveEntryFeePurchases(clients, purchases) {
+  const activeClientIds = new Set(
+    clients.filter((client) => client.status === 'em uso').map((client) => client.id)
+  );
+
+  return purchases.map((purchase) => {
+    if (
+      purchase.itemId === 'entry-fee' &&
+      activeClientIds.has(purchase.clientId) &&
+      purchase.closedAt
+    ) {
+      const { closedAt, ...openPurchase } = purchase;
+      return openPurchase;
+    }
+    return purchase;
+  });
+}
+
 function normalizeState(parsed) {
   let items = Array.isArray(parsed.items) && parsed.items.length ? parsed.items : initialState.items;
   if (!items.some((item) => item.id === 'entry-fee')) {
@@ -90,13 +108,18 @@ function normalizeState(parsed) {
   }
 
   const entryFeeItem = items.find((item) => item.id === 'entry-fee');
+  const clients = Array.isArray(parsed.clients) && parsed.clients.length ? parsed.clients : initialState.clients;
+  const purchases = normalizeActiveEntryFeePurchases(
+    clients,
+    Array.isArray(parsed.purchases) ? parsed.purchases : []
+  );
 
   return {
     ...initialState,
     ...parsed,
     items,
-    clients: Array.isArray(parsed.clients) && parsed.clients.length ? parsed.clients : initialState.clients,
-    purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+    clients,
+    purchases,
     entryFee: Number(entryFeeItem?.price ?? parsed.entryFee) || 0,
     users: Array.isArray(parsed.users) && parsed.users.length
       ? sanitizeUsers(parsed.users)
@@ -278,6 +301,7 @@ const modalProductSelect = document.getElementById('modalProductSelect');
 const modalProductQuantity = document.getElementById('modalProductQuantity');
 const modalSalesList = document.getElementById('modalSalesList');
 const closeAccountBtn = document.getElementById('closeAccountBtn');
+const cancelKeyBtn = document.getElementById('cancelKeyBtn');
 
 const changePasswordModal = document.getElementById('changePasswordModal');
 const changePasswordBackdrop = document.getElementById('changePasswordBackdrop');
@@ -439,7 +463,9 @@ function openKeyModal(client) {
   keyModal.classList.remove('hidden');
   modalKeyTitle.textContent = `Chave ${client.ficha}`;
   modalProductQuantity.value = '1';
-  closeAccountBtn.classList.toggle('hidden', client.status !== 'em uso');
+  const keyInUse = client.status === 'em uso';
+  closeAccountBtn.classList.toggle('hidden', !keyInUse);
+  cancelKeyBtn.classList.toggle('hidden', !keyInUse);
   renderKeyPanel();
   renderModalProductOptions();
   renderModalSales();
@@ -460,7 +486,6 @@ function chargeEntryFeeAtEntry(client, isNewAccount) {
   const missingEntryFeeForOpenAccount = !isNewAccount && entryFeePurchases.length === 0;
   if ((!isNewAccount && !missingEntryFeeForOpenAccount) || entryFee <= 0) return false;
 
-  const now = new Date().toISOString();
   state.purchases.push({
     id: crypto.randomUUID(),
     clientId: client.id,
@@ -468,8 +493,7 @@ function chargeEntryFeeAtEntry(client, isNewAccount) {
     itemName: entryFeeItem.name,
     quantity: 1,
     total: entryFee,
-    createdAt: now,
-    closedAt: now
+    createdAt: new Date().toISOString()
   });
   return true;
 }
@@ -956,6 +980,27 @@ closeAccountBtn.addEventListener('click', () => {
       closeKeyModal();
     },
     'Confirmar pagamento'
+  );
+});
+
+cancelKeyBtn.addEventListener('click', () => {
+  if (!activeModalClientId) {
+    return;
+  }
+
+  const client = state.clients.find((entry) => entry.id === activeModalClientId);
+  openConfirmModal(
+    'Cancelar chave',
+    `Cancelar ${client?.name || 'chave'}? A chave será liberada e nenhuma venda será registrada.`,
+    null,
+    () => {
+      window.BebidasLogic.cancelClientKey(state, activeModalClientId);
+      state.activeKeyId = null;
+      saveState();
+      render();
+      closeKeyModal();
+    },
+    'Cancelar chave'
   );
 });
 

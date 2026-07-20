@@ -440,7 +440,18 @@ tbody tr td {
 .modal-actions {
   margin-top: 18px;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.danger-btn {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+.danger-btn:hover {
+  background: #fef2f2;
 }
 
 .confirm-dialog {

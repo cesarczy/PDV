@@ -50,11 +50,56 @@
     return state;
   }
 
+  function getCurrentSessionPurchases(clientId, purchases) {
+    const clientPurchases = purchases.filter((purchase) => purchase.clientId === clientId);
+    const closedConsumables = clientPurchases.filter(
+      (purchase) => purchase.itemId !== 'entry-fee' && purchase.closedAt
+    );
+    const lastSessionEnd = closedConsumables.length
+      ? Math.max(...closedConsumables.map((purchase) => new Date(purchase.closedAt).getTime()))
+      : 0;
+
+    return clientPurchases.filter((purchase) => {
+      if (!purchase.closedAt) {
+        return true;
+      }
+      if (purchase.itemId === 'entry-fee') {
+        return new Date(purchase.createdAt).getTime() > lastSessionEnd;
+      }
+      return false;
+    });
+  }
+
+  function cancelClientKey(state, clientId) {
+    const client = state.clients.find((entry) => entry.id === clientId);
+    if (!client) {
+      return state;
+    }
+
+    const sessionPurchases = getCurrentSessionPurchases(clientId, state.purchases);
+    const sessionPurchaseIds = new Set(sessionPurchases.map((purchase) => purchase.id));
+
+    sessionPurchases.forEach((purchase) => {
+      if (purchase.itemId !== 'entry-fee') {
+        const item = state.items.find((entry) => entry.id === purchase.itemId);
+        if (item) {
+          item.stock += purchase.quantity;
+        }
+      }
+    });
+
+    state.purchases = state.purchases.filter((purchase) => !sessionPurchaseIds.has(purchase.id));
+    client.status = 'livre';
+    client.name = `Chave ${client.ficha}`;
+    return state;
+  }
+
   return {
     buildInitialClients,
     getOpenPurchases,
     getClientPurchases,
     getClientTotal,
-    closeClientAccount
+    closeClientAccount,
+    cancelClientKey
   };
 });
